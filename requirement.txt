@@ -1,1 +1,2 @@
 prometheus_client
+flask=2.3.2
