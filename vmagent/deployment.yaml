@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmagent
+  namespace: default
+  labels:
+    app: vmagent
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vmagent
+  template:
+    metadata:
+      labels:
+        app: vmagent
+    spec:
+      serviceAccountName: vmagent
+      containers:
+        - name: vmagent
+          image: "victoriametrics/vmagent:v1.96.0"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+          args:
+            - -cxe
+            - exec /vmagent-prod
+              -promscrape.config=/etc/prometheus/prometheus.yaml
+              -promscrape.streamParse=true
+              -promscrape.cluster.replicationFactor=1
+              -promscrape.cluster.membersCount=1
+              -promscrape.maxScrapeSize=50MB
+              -remoteWrite.tmpDataPath=/vmagent-remotewrite-data
+              -remoteWrite.maxDiskUsagePerURL=1073741824
+              -remoteWrite.tlsInsecureSkipVerify=true
+              -remoteWrite.url=${REMOTEWRITE_URL}
+              -remoteWrite.basicAuth.username=${REMOTEWRITE_BASICAUTH_USERNAME} // using basic_auth
+              -remoteWrite.basicAuth.password=${REMOTEWRITE_BASICAUTH_PASSWORD} // using basic_auth
+              -remoteWrite.headers=${REMOTEWRITE_TOKEN} // using token
+              -remoteWrite.relabelConfig=/etc/vmagent/relabel.yaml
+              -remoteWrite.label=${REMOTEWRITE_LABEL}
+              -envflag.enable=true
+              -envflag.prefix=VM_
+              -loggerFormat=json
+          envFrom:
+            - configMapRef:
+                name: vmagent-config-1
+          ports:
+            - name: http
+              containerPort: 8429
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: "250m"
+              memory: 250Mi
+          volumeMounts:
+            - name: config
+              subPath: relabel.yaml
+              mountPath: /etc/vmagent/relabel.yaml
+            - name: config
+              subPath: prometheus.yaml
+              mountPath: /etc/prometheus/prometheus.yaml
+            - name: data
+              mountPath: /vmagent-remotewrite-data
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: vmagent-config-0
+            defaultMode: 420
+        - name: data
+          emptyDir: {}

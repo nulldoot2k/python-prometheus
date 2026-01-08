@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmagent-config-1
+  namespace: default
+data:
+  REMOTEWRITE_URL: https://endpoint/protocol
+  # REMOTEWRITE_BASICAUTH_USERNAME: username
+  # REMOTEWRITE_BASICAUTH_PASSWORD: password
+  # REMOTEWRITE_TOKEN: token
+  REMOTEWRITE_LABEL: monitor=vmagent-test

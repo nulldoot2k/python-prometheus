@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: vmagent
+  name: vmagent
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8429
+    protocol: TCP
+    targetPort: 8429
+  selector:
+    app: vmagent
+  type: ClusterIP

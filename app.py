@@ -1,13 +1,24 @@
 from flask import Flask, jsonify, request, render_template, redirect, url_for
- 
-from prometheus_client import Counter, start_http_server
- 
-REQUESTS = Counter('http_request_total',
-                   'Total number of requests')
- 
+from prometheus_client import Counter, Histogram, start_http_server
+import time
+
 app = Flask(__name__)
- 
-# Sample initial book data
+
+# ===== METRICS =====
+HTTP_REQUESTS_TOTAL = Counter(
+    'http_requests_total',
+    'Total HTTP requests',
+    ['method', 'endpoint', 'status']
+)
+
+HTTP_REQUEST_DURATION = Histogram(
+    'http_request_duration_seconds',
+    'HTTP request latency',
+    ['method', 'endpoint'],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5)
+)
+
+# ===== DATA =====
 books = [
     {"id": 1, "title": "The Expanse", "novel_title": "Leviathan Wakes", "author": "James S. A. Corey", "publisher": "Orbit Book"},
     {"id": 2, "title": "The Expanse", "novel_title": "Caliban's War", "author": "James S. A. Corey", "publisher": "Orbit Book"},
@@ -16,22 +27,41 @@ books = [
     {"id": 5, "title": "The Expanse", "novel_title": "Nemesis Games", "author": "James S. A. Corey", "publisher": "Orbit Book"},
     {"id": 6, "title": "The Expanse", "novel_title": "Babylon's Ashes", "author": "James S. A. Corey", "publisher": "Orbit Book"},
 ]
- 
-# Welcome route for the root URL ("/")
+
+# ===== METRICS HOOK =====
+@app.before_request
+def start_timer():
+    request.start_time = time.time()
+
+@app.after_request
+def record_metrics(response):
+    latency = time.time() - request.start_time
+    endpoint = request.endpoint or "unknown"
+
+    HTTP_REQUESTS_TOTAL.labels(
+        method=request.method,
+        endpoint=endpoint,
+        status=response.status_code
+    ).inc()
+
+    HTTP_REQUEST_DURATION.labels(
+        method=request.method,
+        endpoint=endpoint
+    ).observe(latency)
+
+    return response
+
+# ===== ROUTES =====
 @app.route('/')
 def home():
     return render_template('index.html')
- 
-# Get all books
+
 @app.route('/books', methods=['GET'])
 def get_books():
-    REQUESTS.inc()
     return jsonify(books)
- 
-# Create a new book
+
 @app.route('/books', methods=['POST'])
 def create_book():
-    REQUESTS.inc()
     new_book = {
         'id': len(books) + 1,
         'title': request.form['title'],
@@ -41,30 +71,28 @@ def create_book():
     }
     books.append(new_book)
     return redirect(url_for('home'))
- 
-# Update a book
+
 @app.route('/books/<int:book_id>', methods=['PUT'])
 def update_book(book_id):
-    REQUESTS.inc()
     book = next((book for book in books if book['id'] == book_id), None)
     if book:
-        book['title'] = request.form.get('title', book['title'])
-        book['novel_title'] = request.form.get('novel_title', book['novel_title'])
-        book['author'] = request.form.get('author', book['author'])
-        book['publisher'] = request.form.get('publisher', book['publisher'])
+        book.update({
+            'title': request.form.get('title', book['title']),
+            'novel_title': request.form.get('novel_title', book['novel_title']),
+            'author': request.form.get('author', book['author']),
+            'publisher': request.form.get('publisher', book['publisher']),
+        })
         return jsonify(book)
     return jsonify({"message": "Book not found"}), 404
- 
-# Delete a book
+
 @app.route('/books/<int:book_id>', methods=['DELETE'])
 def delete_book(book_id):
-    REQUESTS.inc()
     book = next((book for book in books if book['id'] == book_id), None)
     if book:
         books.remove(book)
         return jsonify({"message": "Book deleted"})
     return jsonify({"message": "Book not found"}), 404
- 
+
 if __name__ == '__main__':
     start_http_server(9090)
     app.run(host='0.0.0.0', port=8080)
