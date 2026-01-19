@@ -23,7 +23,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: myapp
-          image: host.registry.com/library/python-prometheus:latest-v1
+          image: vumanhdat2k/python-prometheus:latest-v1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
