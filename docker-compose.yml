@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  books-api:
+    image: vumanhdat2k/python-prometheus:latest-v2
+    container_name: books_api
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: booksdb
+      DB_USER: username
+      DB_PASSWORD: passworduser123
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - books_network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: books_db
+    environment:
+      POSTGRES_DB: booksdb
+      POSTGRES_USER: username
+      POSTGRES_PASSWORD: passworduser123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U username -d booksdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - books_network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: books_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: passwordpsql
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - books_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./postgresql/servers.json:/pgadmin4/servers.json
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  books_network:
+    driver: bridge
