@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, render_template, redirect, url_for
 from prometheus_client import Counter, Histogram, start_http_server
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 import time
 import os
@@ -22,6 +23,9 @@ DB_CONFIG = {
     'connect_timeout': 5
 }
 
+# Connection pool for better performance
+connection_pool = None
+
 def validate_db_config():
     """Validate required environment variables"""
     required_vars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']
@@ -37,6 +41,21 @@ def validate_db_config():
         print("  - DB_PASSWORD: Database password")
         print("  - DB_PORT: Database port (optional, default: 5432)")
         sys.exit(1)
+
+def init_connection_pool():
+    """Initialize connection pool"""
+    global connection_pool
+    try:
+        connection_pool = pool.ThreadedConnectionPool(
+            minconn=2,  # Minimum connections
+            maxconn=10,  # Maximum connections
+            **DB_CONFIG
+        )
+        print("✓ Database connection pool initialized")
+        return True
+    except Exception as e:
+        print(f"✗ Failed to initialize connection pool: {e}")
+        return False
 
 def wait_for_db(max_retries=30, retry_delay=2):
     """Wait for database to be available"""
@@ -59,23 +78,26 @@ def wait_for_db(max_retries=30, retry_delay=2):
                 return False
     return False
 
-def get_db_connection(max_retries=3):
-    """Create database connection with retry logic"""
-    for attempt in range(1, max_retries + 1):
-        try:
-            conn = psycopg2.connect(**DB_CONFIG)
-            return conn
-        except psycopg2.OperationalError as e:
-            if attempt < max_retries:
-                print(f"Database connection attempt {attempt} failed, retrying...")
-                time.sleep(1)
-            else:
-                print(f"Database connection error after {max_retries} attempts: {e}")
-                return None
-        except Exception as e:
-            print(f"Unexpected database error: {e}")
-            return None
-    return None
+def get_db_connection():
+    """Get connection from pool with timeout"""
+    try:
+        if connection_pool:
+            conn = connection_pool.getconn()
+            if conn:
+                return conn
+        print("Connection pool not available, creating new connection")
+        return psycopg2.connect(**DB_CONFIG)
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        return None
+
+def return_db_connection(conn):
+    """Return connection to pool"""
+    try:
+        if connection_pool and conn:
+            connection_pool.putconn(conn)
+    except Exception as e:
+        print(f"Error returning connection to pool: {e}")
 
 # ===== METRICS =====
 HTTP_REQUESTS_TOTAL = Counter(
@@ -102,6 +124,12 @@ DB_ERRORS_TOTAL = Counter(
     'db_errors_total',
     'Total database errors',
     ['operation']
+)
+
+DB_POOL_SIZE = Histogram(
+    'db_pool_size',
+    'Database connection pool size',
+    buckets=(0, 2, 5, 10, 20)
 )
 
 # ===== METRICS HOOK =====
@@ -132,6 +160,22 @@ def record_metrics(response):
 def home():
     return render_template('index.html')
 
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
+            cursor.close()
+            return_db_connection(conn)
+            return jsonify({"status": "healthy", "database": "connected"}), 200
+        else:
+            return jsonify({"status": "unhealthy", "database": "disconnected"}), 503
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "error": str(e)}), 503
+
 @app.route('/books', methods=['GET'])
 def get_books():
     start = time.time()
@@ -145,13 +189,14 @@ def get_books():
         cursor.execute('SELECT id, title, novel_title, author, publisher FROM books ORDER BY id')
         books = cursor.fetchall()
         cursor.close()
-        conn.close()
+        return_db_connection(conn)
         
         DB_QUERY_DURATION.labels(operation='select').observe(time.time() - start)
         return jsonify(books)
     except Exception as e:
         DB_ERRORS_TOTAL.labels(operation='select').inc()
         print(f"Error fetching books: {e}")
+        return_db_connection(conn)
         return jsonify({"error": "Failed to fetch books"}), 500
 
 @app.route('/books', methods=['POST'])
@@ -176,13 +221,16 @@ def create_book():
         )
         conn.commit()
         cursor.close()
-        conn.close()
+        return_db_connection(conn)
         
         DB_QUERY_DURATION.labels(operation='insert').observe(time.time() - start)
         return redirect(url_for('home'))
     except Exception as e:
         DB_ERRORS_TOTAL.labels(operation='insert').inc()
         print(f"Error creating book: {e}")
+        if conn:
+            conn.rollback()
+        return_db_connection(conn)
         return jsonify({"error": "Failed to create book"}), 500
 
 @app.route('/books/<int:book_id>', methods=['PUT'])
@@ -202,7 +250,7 @@ def update_book(book_id):
         
         if not book:
             cursor.close()
-            conn.close()
+            return_db_connection(conn)
             return jsonify({"message": "Book not found"}), 404
         
         # Update with new values or keep existing
@@ -225,13 +273,16 @@ def update_book(book_id):
         updated_book = cursor.fetchone()
         
         cursor.close()
-        conn.close()
+        return_db_connection(conn)
         
         DB_QUERY_DURATION.labels(operation='update').observe(time.time() - start)
         return jsonify(updated_book)
     except Exception as e:
         DB_ERRORS_TOTAL.labels(operation='update').inc()
         print(f"Error updating book: {e}")
+        if conn:
+            conn.rollback()
+        return_db_connection(conn)
         return jsonify({"error": "Failed to update book"}), 500
 
 @app.route('/books/<int:book_id>', methods=['DELETE'])
@@ -248,7 +299,7 @@ def delete_book(book_id):
         deleted = cursor.fetchone()
         conn.commit()
         cursor.close()
-        conn.close()
+        return_db_connection(conn)
         
         DB_QUERY_DURATION.labels(operation='delete').observe(time.time() - start)
         
@@ -259,6 +310,9 @@ def delete_book(book_id):
     except Exception as e:
         DB_ERRORS_TOTAL.labels(operation='delete').inc()
         print(f"Error deleting book: {e}")
+        if conn:
+            conn.rollback()
+        return_db_connection(conn)
         return jsonify({"error": "Failed to delete book"}), 500
 
 if __name__ == '__main__':
@@ -268,6 +322,11 @@ if __name__ == '__main__':
     # Wait for database to be ready
     if not wait_for_db():
         print("✗ Cannot start application: Database is not available")
+        sys.exit(1)
+    
+    # Initialize connection pool
+    if not init_connection_pool():
+        print("✗ Cannot start application: Failed to initialize connection pool")
         sys.exit(1)
     
     # Start Prometheus metrics server
