@@ -2,19 +2,13 @@
 
 # Configuration
 BASE_URL="http://localhost:8080"
-INTERVAL=5
+INTERVAL=5  # seconds between requests
 
 # Color output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
-
-# Sample book data for random insertion
-declare -a TITLES=("Cuộc Chiến Thần Thoại" "Hành Trình Về Phương Đông" "Kỷ Nguyên Huyền Bí" "Vương Giả Thiên Hạ" "Đế Vương Truyền Kỳ")
-declare -a NOVEL_TITLES=("The Mythical War" "Journey to the East" "The Mystic Era" "King of the World" "Emperor's Legend")
-declare -a AUTHORS=("Nguyễn Văn A" "Trần Thị B" "Lê Văn C" "Phạm Thị D" "Hoàng Văn E")
-declare -a PUBLISHERS=("NXB Kim Đồng" "NXB Trẻ" "NXB Văn Học" "NXB Hội Nhà Văn" "NXB Thanh Niên")
 
 # Counter
 REQUEST_COUNT=0
@@ -25,10 +19,55 @@ echo -e "${GREEN}Target: $BASE_URL${NC}"
 echo -e "${GREEN}Interval: ${INTERVAL}s${NC}"
 echo -e "${GREEN}========================================${NC}\n"
 
-# Function to get random element from array
-get_random() {
-    local arr=("$@")
-    echo "${arr[$RANDOM % ${#arr[@]}]}"
+# Function to generate random Vietnamese name
+generate_random_name() {
+    local surnames=("Nguyễn" "Trần" "Lê" "Phạm" "Hoàng" "Phan" "Vũ" "Đặng" "Bùi" "Đỗ" "Hồ" "Ngô" "Dương" "Lý")
+    local midnames=("Văn" "Thị" "Minh" "Hữu" "Đức" "Anh" "Hồng" "Quang" "Thu" "Thanh")
+    local names=("A" "B" "C" "D" "E" "F" "G" "H" "K" "L" "M" "N" "P" "Q" "T" "V" "X" "Y")
+    
+    local surname="${surnames[$RANDOM % ${#surnames[@]}]}"
+    local midname="${midnames[$RANDOM % ${#midnames[@]}]}"
+    local name="${names[$RANDOM % ${#names[@]}]}"
+    
+    echo "$surname $midname $name"
+}
+
+# Function to generate random Vietnamese book title
+generate_random_title() {
+    local prefixes=("Hành Trình" "Cuộc Chiến" "Truyền Thuyết" "Kỷ Nguyên" "Vương Giả" "Đế Vương" "Huyền Thoại" "Bí Ẩn" "Hồi Ức" "Ký Ức" "Phiêu Lưu" "Thiên Hạ" "Giang Hồ" "Võ Lâm")
+    local suffixes=("Phương Đông" "Thần Thoại" "Huyền Bí" "Cổ Đại" "Tương Lai" "Đại Lục" "Thiên Địa" "Vô Song" "Truyền Kỳ" "Bất Diệt" "Vĩnh Hằng" "Tối Cao" "Bất Tử" "Huyền Môn")
+    
+    local prefix="${prefixes[$RANDOM % ${#prefixes[@]}]}"
+    local suffix="${suffixes[$RANDOM % ${#suffixes[@]}]}"
+    local number=$((RANDOM % 100 + 1))
+    
+    # Randomly choose format
+    case $((RANDOM % 3)) in
+        0) echo "$prefix $suffix" ;;
+        1) echo "$prefix $suffix $number" ;;
+        2) echo "$suffix $prefix" ;;
+    esac
+}
+
+# Function to generate random English title
+generate_random_english_title() {
+    local words=("Legend" "Empire" "Journey" "Chronicles" "Saga" "Quest" "War" "King" "Dragon" "Shadow" "Light" "Dark" "Mystic" "Ancient" "Eternal" "Divine" "Supreme" "Ultimate" "Rising" "Fallen")
+    
+    local word1="${words[$RANDOM % ${#words[@]}]}"
+    local word2="${words[$RANDOM % ${#words[@]}]}"
+    
+    case $((RANDOM % 3)) in
+        0) echo "The $word1 $word2" ;;
+        1) echo "$word1 of the $word2" ;;
+        2) echo "$word1 and $word2" ;;
+    esac
+}
+
+# Function to generate random publisher
+generate_random_publisher() {
+    local publishers=("NXB Kim Đồng" "NXB Trẻ" "NXB Văn Học" "NXB Hội Nhà Văn" "NXB Thanh Niên" "NXB Phụ Nữ" "NXB Lao Động" "NXB Tổng Hợp" "NXB Đại Học Quốc Gia" "NXB Chính Trị" "NXB Giáo Dục" "NXB Tư Pháp")
+    
+    echo "${publishers[$RANDOM % ${#publishers[@]}]}"
 }
 
 # Function to make GET request to home page
@@ -47,10 +86,10 @@ request_get_books() {
 
 # Function to create a new book
 request_create_book() {
-    local title=$(get_random "${TITLES[@]}")
-    local novel_title=$(get_random "${NOVEL_TITLES[@]}")
-    local author=$(get_random "${AUTHORS[@]}")
-    local publisher=$(get_random "${PUBLISHERS[@]}")
+    local title=$(generate_random_title)
+    local novel_title=$(generate_random_english_title)
+    local author=$(generate_random_name)
+    local publisher=$(generate_random_publisher)
     
     echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} POST /books - Create: $title"
     curl -k -s -L -o /dev/null -w "Status: %{http_code} | Time: %{time_total}s\n" \
@@ -74,13 +113,19 @@ request_get_book() {
 # Function to update a book
 request_update_book() {
     local book_id=$((1 + $RANDOM % 10))  # Random ID between 1-10
-    local title=$(get_random "${TITLES[@]}")
+    local title=$(generate_random_title)
+    local novel_title=$(generate_random_english_title)
+    local author=$(generate_random_name)
+    local publisher=$(generate_random_publisher)
     
     echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} PUT /books/$book_id - Update book"
     curl -k -s -o /dev/null -w "Status: %{http_code} | Time: %{time_total}s\n" \
         -X PUT \
         -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "title=$title (Updated)" \
+        -d "title=$title" \
+        -d "novel_title=$novel_title" \
+        -d "author=$author" \
+        -d "publisher=$publisher" \
         "$BASE_URL/books/$book_id"
 }
 
